@@ -1,0 +1,474 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GYM NFC | Control de acceso</title>
+
+<style>
+:root {
+  --bg: #0b1020;
+  --panel: #171f32;
+  --green: #21d49a;
+  --text: #f4f7ff;
+  --muted: #a5b1c7;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, sans-serif;
+}
+header {
+  padding: 25px;
+  background: #111a2d;
+  border-bottom: 2px solid var(--green);
+}
+h1 { margin: 0; color: var(--green); }
+h2 { margin-top: 0; }
+p { color: var(--muted); }
+main {
+  max-width: 1050px;
+  margin: auto;
+  padding: 20px;
+}
+.card {
+  background: var(--panel);
+  padding: 22px;
+  border-radius: 16px;
+  margin-bottom: 20px;
+}
+input, select, button {
+  width: 100%;
+  padding: 13px;
+  margin: 7px 0;
+  border-radius: 9px;
+  font-size: 15px;
+}
+input, select {
+  background: #0c1425;
+  border: 1px solid #39465c;
+  color: white;
+}
+button {
+  background: var(--green);
+  color: #06130e;
+  border: none;
+  font-weight: bold;
+  cursor: pointer;
+}
+button.secondary {
+  background: #34435c;
+  color: white;
+}
+button.danger {
+  background: #e76b73;
+  color: #170509;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px,1fr));
+  gap: 15px;
+}
+.stat {
+  background: #101a2d;
+  border-radius: 12px;
+  padding: 20px;
+}
+.stat strong {
+  display: block;
+  font-size: 30px;
+  color: var(--green);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th, td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #34405a;
+}
+.scroll { overflow-x: auto; }
+.ok { color: #21d49a; }
+.bad { color: #ff8585; }
+#estado {
+  padding: 16px;
+  background: #101a2d;
+  border-radius: 10px;
+  margin-top: 12px;
+}
+small { color: var(--muted); }
+</style>
+</head>
+
+<body>
+<header>
+  <h1>GYM NFC</h1>
+  <p>Administración de socios y control de acceso</p>
+</header>
+
+<main>
+
+<section class="card">
+  <h2>Panel general</h2>
+  <div class="grid">
+    <div class="stat">
+      <p>Socios registrados</p>
+      <strong id="total">0</strong>
+    </div>
+    <div class="stat">
+      <p>Membresías vigentes</p>
+      <strong id="activos">0</strong>
+    </div>
+    <div class="stat">
+      <p>Entradas registradas</p>
+      <strong id="entradas">0</strong>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Escáner NFC</h2>
+  <p>Acerca una tarjeta NFC compatible al teléfono.</p>
+
+  <button onclick="iniciarNFC()">
+    Activar lector NFC
+  </button>
+
+  <div id="estado">Lector desactivado</div>
+
+  <p>Identificador detectado:</p>
+  <input id="chip" placeholder="Esperando tarjeta..." readonly>
+
+  <small>
+    Web NFC requiere Chrome en Android, HTTPS
+    y una tarjeta NDEF compatible.
+  </small>
+</section>
+
+<section class="card">
+  <h2>Registrar socio</h2>
+
+  <input id="nombre" placeholder="Nombre completo">
+  <input id="telefono" placeholder="Teléfono">
+
+  <label>Vencimiento de membresía</label>
+  <input type="date" id="vencimiento">
+
+  <input id="uid" placeholder="Identificador de tarjeta NFC">
+
+  <button onclick="guardarSocio()">
+    Registrar socio
+  </button>
+</section>
+
+<section class="card">
+  <h2>Consultar acceso</h2>
+
+  <input id="buscarUID" placeholder="Identificador de tarjeta">
+
+  <button onclick="verificarAcceso()">
+    Verificar y registrar entrada
+  </button>
+
+  <div id="acceso"></div>
+</section>
+
+<section class="card">
+  <h2>Socios registrados</h2>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Tarjeta</th>
+          <th>Vencimiento</th>
+          <th>Estado</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody id="tablaSocios"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Historial de entradas</h2>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Socio</th>
+          <th>Fecha y hora</th>
+        </tr>
+      </thead>
+      <tbody id="tablaHistorial"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Respaldo de información</h2>
+  <button onclick="exportarDatos()">
+    Descargar respaldo JSON
+  </button>
+  <small>
+    Los datos se guardan únicamente en este navegador.
+    No borres sus datos sin hacer un respaldo.
+  </small>
+</section>
+
+</main>
+
+<script>
+const CLAVE_SOCIOS = "gym_nfc_socios";
+const CLAVE_ENTRADAS = "gym_nfc_entradas";
+
+let socios = JSON.parse(
+  localStorage.getItem(CLAVE_SOCIOS) || "[]"
+);
+let historial = JSON.parse(
+  localStorage.getItem(CLAVE_ENTRADAS) || "[]"
+);
+
+let lector = null;
+
+function persistir() {
+  localStorage.setItem(
+    CLAVE_SOCIOS, JSON.stringify(socios)
+  );
+  localStorage.setItem(
+    CLAVE_ENTRADAS, JSON.stringify(historial)
+  );
+  actualizar();
+}
+
+function fechaLocal(fecha) {
+  const d = new Date(fecha + "T23:59:59");
+  return d.getTime();
+}
+
+function vigente(socio) {
+  return fechaLocal(socio.vencimiento) >= Date.now();
+}
+
+async function iniciarNFC() {
+  const estado = document.getElementById("estado");
+
+  if (!("NDEFReader" in window)) {
+    estado.textContent =
+      "Este navegador no admite Web NFC.";
+    return;
+  }
+
+  try {
+    lector = new NDEFReader();
+    await lector.scan();
+
+    estado.textContent =
+      "Lector activo. Acerca una tarjeta NFC.";
+
+    lector.onreading = evento => {
+      const id = evento.serialNumber;
+
+      if (!id) {
+        estado.textContent =
+          "Tarjeta detectada sin identificador disponible.";
+        return;
+      }
+
+      document.getElementById("chip").value = id;
+      document.getElementById("uid").value = id;
+      document.getElementById("buscarUID").value = id;
+
+      estado.textContent =
+        "Tarjeta detectada: " + id;
+
+      verificarAcceso();
+    };
+
+    lector.onreadingerror = () => {
+      estado.textContent =
+        "No se pudo leer esta tarjeta.";
+    };
+
+  } catch (error) {
+    estado.textContent =
+      "Error al activar NFC: " + error.message;
+  }
+}
+
+function guardarSocio() {
+  const nombre = document.getElementById("nombre")
+    .value.trim();
+  const telefono = document.getElementById("telefono")
+    .value.trim();
+  const uid = document.getElementById("uid")
+    .value.trim().toUpperCase();
+  const vencimiento =
+    document.getElementById("vencimiento").value;
+
+  if (!nombre || !uid || !vencimiento) {
+    alert("Completa nombre, tarjeta y vencimiento.");
+    return;
+  }
+
+  if (socios.some(s => s.uid === uid)) {
+    alert("Esta tarjeta ya está registrada.");
+    return;
+  }
+
+  socios.push({
+    id: crypto.randomUUID(),
+    nombre,
+    telefono,
+    uid,
+    vencimiento
+  });
+
+  persistir();
+
+  document.getElementById("nombre").value = "";
+  document.getElementById("telefono").value = "";
+  document.getElementById("uid").value = "";
+  document.getElementById("vencimiento").value = "";
+
+  alert("Socio registrado correctamente.");
+}
+
+function verificarAcceso() {
+  const uid = document.getElementById("buscarUID")
+    .value.trim().toUpperCase();
+
+  const panel = document.getElementById("acceso");
+
+  const socio = socios.find(s => s.uid === uid);
+
+  if (!socio) {
+    panel.innerHTML =
+      '<p class="bad">Tarjeta no registrada.</p>';
+    return;
+  }
+
+  if (!vigente(socio)) {
+    panel.innerHTML =
+      '<p class="bad">Membresía vencida: ' +
+      escapar(socio.nombre) + '</p>';
+    return;
+  }
+
+  historial.unshift({
+    nombre: socio.nombre,
+    uid: socio.uid,
+    fecha: new Date().toLocaleString("es-MX")
+  });
+
+  persistir();
+
+  panel.innerHTML =
+    '<p class="ok">Acceso autorizado: ' +
+    escapar(socio.nombre) + '</p>';
+}
+
+function eliminarSocio(id) {
+  if (!confirm("¿Eliminar este socio?")) return;
+
+  socios = socios.filter(s => s.id !== id);
+  persistir();
+}
+
+function escapar(texto) {
+  return String(texto).replace(
+    /[&<>"']/g,
+    c => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[c]
+  );
+}
+
+function actualizar() {
+  document.getElementById("total").textContent =
+    socios.length;
+
+  document.getElementById("activos").textContent =
+    socios.filter(vigente).length;
+
+  document.getElementById("entradas").textContent =
+    historial.length;
+
+  const tabla = document.getElementById("tablaSocios");
+  tabla.innerHTML = "";
+
+  socios.forEach(s => {
+    const fila = document.createElement("tr");
+
+    [
+      s.nombre,
+      s.uid,
+      s.vencimiento,
+      vigente(s) ? "Activa" : "Vencida"
+    ].forEach(valor => {
+      const celda = document.createElement("td");
+      celda.textContent = valor;
+      fila.appendChild(celda);
+    });
+
+    const celda = document.createElement("td");
+    const boton = document.createElement("button");
+    boton.className = "danger";
+    boton.textContent = "Eliminar";
+    boton.onclick = () => eliminarSocio(s.id);
+    celda.appendChild(boton);
+    fila.appendChild(celda);
+    tabla.appendChild(fila);
+  });
+
+  const tablaHistorial =
+    document.getElementById("tablaHistorial");
+
+  tablaHistorial.innerHTML = "";
+
+  historial.forEach(e => {
+    const fila = document.createElement("tr");
+
+    [e.nombre, e.fecha].forEach(valor => {
+      const celda = document.createElement("td");
+      celda.textContent = valor;
+      fila.appendChild(celda);
+    });
+
+    tablaHistorial.appendChild(fila);
+  });
+}
+
+function exportarDatos() {
+  const datos = {
+    socios,
+    historial,
+    exportado: new Date().toISOString()
+  };
+
+  const archivo = new Blob(
+    [JSON.stringify(datos, null, 2)],
+    { type: "application/json" }
+  );
+
+  const enlace = document.createElement("a");
+  enlace.href = URL.createObjectURL(archivo);
+  enlace.download = "respaldo-gym-nfc.json";
+  enlace.click();
+
+  setTimeout(() => URL.revokeObjectURL(enlace.href), 1000);
+}
+
+actualizar();
+</script>
+</body>
+</html>
